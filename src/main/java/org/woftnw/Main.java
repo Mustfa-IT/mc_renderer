@@ -10,7 +10,7 @@ public class Main {
   public static void main(String[] args) {
     try {
       // Example URL to a Minecraft skin
-      String skinUrl = "https://www.minecraftskins.com/uploads/skins/2025/04/23/ocean-waters---23219453.png?v825";
+      String skinUrl = "https://www.minecraftskins.com/uploads/skins/2025/04/23/sweetie-rce-23219564.png?v825";
 
       // Output file path
       String outputPath = "rendered_skin.png";

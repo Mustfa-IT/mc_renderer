@@ -76,9 +76,9 @@ public class ModelRenderer {
   private static final int MC_SKIN_HEIGHT = 64;
 
   // Layer inflation constants for outer layer meshes
-  private static final float HEAD_INFLATION = 1.2f; // Increased from 0.9f for more visible effect
-  private static final float BODY_INFLATION = 0.25f;
-  private static final float LIMB_INFLATION = 0.25f;
+  private static final float HEAD_INFLATION = 1.5f; // Increased from 1.2f for even more visible effect
+  private static final float BODY_INFLATION = 0.4f; // Increased from 0.25f
+  private static final float LIMB_INFLATION = 0.4f; // Increased from 0.25f
 
   // Instance variables
   private final int width;
