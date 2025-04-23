@@ -94,9 +94,8 @@ public class MCRenderer {
   public static ByteBuffer renderModelToBufferFromUrl(String textureUrl, RendererConfig config) throws IOException {
     ByteBuffer textureData = TextureLoader.loadTextureFromUrl(textureUrl);
     ByteBuffer renderedImage = ModelRenderer.renderModelWithTexture(config.getModelPath(), textureData,
-        config.getWidth(), config.getWidth());
+        config.getWidth(), config.getHeight());
     return renderedImage;
-
   }
 
   public static ByteBuffer renderModelToBufferFromUrl(String textureUrl) {
@@ -142,7 +141,16 @@ public class MCRenderer {
     }
   }
 
-  private static boolean saveImage(ByteBuffer imageData, int width, int height, String outputPath) {
+  /**
+   * Save image data to a file
+   *
+   * @param imageData  ByteBuffer containing the image data
+   * @param width      Width of the image in pixels
+   * @param height     Height of the image in pixels
+   * @param outputPath Path to save the image to
+   * @return true if saving was successful
+   */
+  public static boolean saveImage(ByteBuffer imageData, int width, int height, String outputPath) {
     STBImageWrite.stbi_flip_vertically_on_write(true);
     return STBImageWrite.stbi_write_png(outputPath, width, height, 3, imageData, width * 3);
   }

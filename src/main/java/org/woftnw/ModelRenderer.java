@@ -34,12 +34,13 @@ import java.util.List;
  * <li>Rendering models with configurable dimensions.</li>
  * <li>Using OpenGL shaders for rendering.</li>
  * <li>Outputting rendered images as raw pixel data.</li>
+ * <li>Support for Minecraft skin outer layers (hat, jacket, etc).</li>
  * </ul>
  *
  * <p>
  * Usage example:
  * </p>
- * 
+ *
  * <pre>
  * ByteBuffer textureData = ...; // Load texture data
  * ByteBuffer renderedImage = ModelRenderer.renderModelWithTexture("/path/to/model.obj", textureData, 800, 600);
@@ -70,6 +71,15 @@ public class ModelRenderer {
   private static final int DEFAULT_WIDTH = 300;
   private static final int DEFAULT_HEIGHT = 600;
 
+  // Minecraft skin texture dimensions (standard 64x64 skin)
+  private static final int MC_SKIN_WIDTH = 64;
+  private static final int MC_SKIN_HEIGHT = 64;
+
+  // Layer inflation constants for outer layer meshes
+  private static final float HEAD_INFLATION = 1.2f; // Increased from 0.9f for more visible effect
+  private static final float BODY_INFLATION = 0.25f;
+  private static final float LIMB_INFLATION = 0.25f;
+
   // Instance variables
   private final int width;
   private final int height;
@@ -81,6 +91,10 @@ public class ModelRenderer {
   private int textureColorbuffer;
   private int modelTexture;
   private List<Mesh> meshes = new ArrayList<>();
+  private List<Mesh> overlayMeshes = new ArrayList<>(); // New list for overlay meshes
+  private boolean isMinecraftSkin = false; // Flag to track if we're rendering a Minecraft skin
+  private int textureWidth = 0;
+  private int textureHeight = 0;
 
   // Render configuration
   private Vector3f backgroundColor = new Vector3f(0.1f, 0.1f, 0.1f);
@@ -303,6 +317,20 @@ public class ModelRenderer {
       throw new RuntimeException("Failed to load texture: " + STBImage.stbi_failure_reason());
     }
 
+    // Store texture dimensions
+    textureWidth = width.get(0);
+    textureHeight = height.get(0);
+
+    // Check if this is likely a Minecraft skin (64x64 or 64x32)
+    isMinecraftSkin = (textureWidth == MC_SKIN_WIDTH &&
+        (textureHeight == MC_SKIN_HEIGHT || textureHeight == MC_SKIN_HEIGHT / 2));
+
+    // If this is a Minecraft skin and we've already loaded the model, create
+    // overlay meshes
+    if (isMinecraftSkin && !meshes.isEmpty()) {
+      createOverlayMeshes();
+    }
+
     // Upload texture to GPU
     GL11.glTexImage2D(GL11.GL_TEXTURE_2D, 0, GL11.GL_RGBA, width.get(0), height.get(0),
         0, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, imageData);
@@ -355,6 +383,13 @@ public class ModelRenderer {
 
       // Process meshes
       processNode(scene.mRootNode(), scene);
+    }
+
+    // If this is a Minecraft skin (determined by texture dimensions) and texture is
+    // loaded,
+    // create overlay meshes
+    if (isMinecraftSkin && textureWidth > 0 && textureHeight > 0) {
+      createOverlayMeshes();
     }
   }
 
@@ -483,6 +518,110 @@ public class ModelRenderer {
     // Create mesh VAO/VBO
     int vao = createMeshVAO(vertices, normals, texCoords, indices);
     return new Mesh(vao, indices.size(), vertices, normals, texCoords, indices);
+  }
+
+  /**
+   * Create inflated overlay meshes for Minecraft skin outer layer
+   */
+  private void createOverlayMeshes() {
+    overlayMeshes.clear();
+
+    for (Mesh baseMesh : meshes) {
+      // Create an inflated version of each mesh for the overlay
+      Mesh overlayMesh = createInflatedMesh(baseMesh);
+      if (overlayMesh != null) {
+        overlayMeshes.add(overlayMesh);
+      }
+    }
+  }
+
+  /**
+   * Create an inflated version of a mesh for the outer layer
+   */
+  private Mesh createInflatedMesh(Mesh baseMesh) {
+    List<Float> vertices = new ArrayList<>(baseMesh.vertices);
+    List<Float> normals = new ArrayList<>(baseMesh.normals);
+    List<Float> texCoords = new ArrayList<>();
+    List<Integer> indices = new ArrayList<>(baseMesh.indices);
+
+    // Determine inflation amount based on mesh size
+    float inflation = determineMeshInflation(baseMesh);
+
+    // Inflate vertices outward along normals
+    List<Float> inflatedVertices = new ArrayList<>();
+    for (int i = 0; i < vertices.size(); i += 3) {
+      float x = vertices.get(i);
+      float y = vertices.get(i + 1);
+      float z = vertices.get(i + 2);
+
+      float nx = normals.get(i);
+      float ny = normals.get(i + 1);
+      float nz = normals.get(i + 2);
+
+      // Inflate vertex position along normal direction
+      inflatedVertices.add(x + nx * inflation);
+      inflatedVertices.add(y + ny * inflation);
+      inflatedVertices.add(z + nz * inflation);
+    }
+
+    // Adjust texture coordinates for outer layer (shift to overlay section)
+    for (int i = 0; i < baseMesh.texCoords.size(); i += 2) {
+      float u = baseMesh.texCoords.get(i);
+      float v = baseMesh.texCoords.get(i + 1);
+
+      // Map to overlay section (typically at offset 32,0 for head, etc.)
+      // For simplicity, this implementation uses base texcoords with offset
+      // A more complete solution would map correctly for each body part
+      if (u >= 0 && u <= 0.5f) { // Left half of texture
+        u += 0.5f; // Move to right half for overlay
+      }
+
+      texCoords.add(u);
+      texCoords.add(v);
+    }
+
+    // Create VAO for overlay mesh
+    int vao = createMeshVAO(inflatedVertices, normals, texCoords, indices);
+    return new Mesh(vao, indices.size(), inflatedVertices, normals, texCoords, indices);
+  }
+
+  /**
+   * Determine the inflation amount for a mesh based on its dimensions
+   */
+  private float determineMeshInflation(Mesh mesh) {
+    // Calculate mesh bounding box
+    float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, minZ = Float.MAX_VALUE;
+    float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
+
+    for (int i = 0; i < mesh.vertices.size(); i += 3) {
+      float x = mesh.vertices.get(i);
+      float y = mesh.vertices.get(i + 1);
+      float z = mesh.vertices.get(i + 2);
+
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      minZ = Math.min(minZ, z);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      maxZ = Math.max(maxZ, z);
+    }
+
+    // Calculate dimensions
+    float width = maxX - minX;
+    float height = maxY - minY;
+    float depth = maxZ - minZ;
+
+    // Determine mesh type based on dimensions (approximate)
+    if (Math.abs(width - 8) < 1 && Math.abs(height - 8) < 1 && Math.abs(depth - 8) < 1) {
+      // Head (8x8x8)
+      return HEAD_INFLATION;
+    } else if (Math.abs(width - 8) < 1 && Math.abs(height - 12) < 1 && Math.abs(depth - 4) < 1) {
+      // Torso (8x12x4)
+      return BODY_INFLATION;
+    } else {
+      // Arms/Legs (4x12x4) or other
+      return LIMB_INFLATION;
+    }
   }
 
   /**
@@ -688,10 +827,6 @@ public class ModelRenderer {
       int lightColorLoc = GL20.glGetUniformLocation(shaderProgram, "lightColor");
       GL20.glUniform3f(lightColorLoc, lightColor.x, lightColor.y, lightColor.z);
 
-      // Set debug mode uniform to 0 (normal rendering)
-      int debugModeLoc = GL20.glGetUniformLocation(shaderProgram, "debugMode");
-      GL20.glUniform1i(debugModeLoc, 0);
-
       // Set texture uniform
       int textureLoc = GL20.glGetUniformLocation(shaderProgram, "textureSampler");
       GL20.glUniform1i(textureLoc, 0); // 0 corresponds to GL_TEXTURE0
@@ -701,12 +836,36 @@ public class ModelRenderer {
     GL13.glActiveTexture(GL13.GL_TEXTURE0);
     GL11.glBindTexture(GL11.GL_TEXTURE_2D, modelTexture);
 
-    // Draw meshes
-    for (Mesh mesh : meshes) {
-      GL30.glBindVertexArray(mesh.getVao());
-      GL11.glDrawElements(GL11.GL_TRIANGLES, mesh.getIndicesCount(), GL11.GL_UNSIGNED_INT, 0);
-      GL30.glBindVertexArray(0);
+    // Enable alpha blending for transparent textures
+    GL11.glEnable(GL11.GL_BLEND);
+    GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+
+    // Regular (two-pass) render for Minecraft skins with overlays
+    if (isMinecraftSkin && !overlayMeshes.isEmpty()) {
+      // First pass: render base mesh
+      for (Mesh mesh : meshes) {
+        GL30.glBindVertexArray(mesh.getVao());
+        GL11.glDrawElements(GL11.GL_TRIANGLES, mesh.getIndicesCount(), GL11.GL_UNSIGNED_INT, 0);
+        GL30.glBindVertexArray(0);
+      }
+
+      // Second pass: render overlay mesh with alpha blending
+      for (Mesh mesh : overlayMeshes) {
+        GL30.glBindVertexArray(mesh.getVao());
+        GL11.glDrawElements(GL11.GL_TRIANGLES, mesh.getIndicesCount(), GL11.GL_UNSIGNED_INT, 0);
+        GL30.glBindVertexArray(0);
+      }
+    } else {
+      // Standard render for non-skin models
+      for (Mesh mesh : meshes) {
+        GL30.glBindVertexArray(mesh.getVao());
+        GL11.glDrawElements(GL11.GL_TRIANGLES, mesh.getIndicesCount(), GL11.GL_UNSIGNED_INT, 0);
+        GL30.glBindVertexArray(0);
+      }
     }
+
+    // Disable blending
+    GL11.glDisable(GL11.GL_BLEND);
 
     // Unbind texture
     GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
@@ -738,6 +897,11 @@ public class ModelRenderer {
 
     // Delete mesh resources
     for (Mesh mesh : meshes) {
+      GL30.glDeleteVertexArrays(mesh.getVao());
+    }
+
+    // Delete overlay mesh resources
+    for (Mesh mesh : overlayMeshes) {
       GL30.glDeleteVertexArrays(mesh.getVao());
     }
 
